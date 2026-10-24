@@ -39,6 +39,9 @@ const DIRECTION_THRESHOLD = 8;
 // Pixels of highlight travel per pixel of (accelerated) finger motion.
 const GAIN = 1.0;
 const HIGHLIGHT_ANIMATION_MS = 90;
+// The cursor starts this many pixels inside the selected tab's edge on the
+// side the user is swiping toward, so the next tab is one short move away.
+const START_INSET = 2;
 
 function log(msg) {
     console.log(`[tabswitch] ${msg}`);
@@ -102,8 +105,9 @@ function computeMapping(window, atspiFrame) {
 
 /* One gesture, from the moment we claim it until the fingers lift. */
 class SwitchSession {
-    constructor(window) {
+    constructor(window, movingRight) {
         this._window = window;
+        this._movingRight = movingRight;
         this._pendingDx = 0;
         this._tabs = null;       // stage-coordinate rects
         this._noTabs = false;    // daemon answered: this window has no tabs
@@ -163,17 +167,25 @@ class SwitchSession {
         debug(`got ${this._tabs.length} tabs from ${res.app} (${res.toolkit}), selected ${res.selected}, ` +
             `${this._elapsedMs()}ms after begin; first tab at ${JSON.stringify(this._tabs[0])}`);
 
-        const start = this._tabs[Math.max(this._selected, 0)];
-        this._cursorX = start.x + start.w / 2;
-        this._moveCursor(this._pendingDx);
-        this._pendingDx = 0;
+        const start = Math.max(this._selected, 0);
+        this._cursorX = this._movingRight
+            ? this._rightBoundary(start) - START_INSET
+            : this._leftBoundary(start) + START_INSET;
 
         if (this._finished) {
-            // Fingers lifted before the reply arrived: act on what they did.
+            // A quick flick that ended before the reply arrived: act on the
+            // motion it made.
+            this._moveCursor(this._pendingDx);
             this._activate();
         } else {
+            // Motion made before the highlight is visible is dropped, so the
+            // highlight always appears on the current tab just short of the
+            // cut-over and only motion the user can see moves it.
+            debug(`dropping ${this._pendingDx.toFixed(1)}px of motion made before tabs arrived`);
+            this._moveCursor(0);
             this._showHighlight();
         }
+        this._pendingDx = 0;
     }
 
     update(dx) {
@@ -184,17 +196,28 @@ class SwitchSession {
         this._moveCursor(dx);
     }
 
-    _moveCursor(dx) {
-        const first = this._tabs[0];
-        const last = this._tabs[this._tabs.length - 1];
-        this._cursorX = Math.min(Math.max(this._cursorX + dx * GAIN, first.x), last.x + last.w);
+    /*
+     * Each tab's hit region. Tabs may overlap (Chrome) or have gaps, so
+     * neighbors split at the midpoint between their centers rather than at
+     * their drawn edges; the outer edges of the strip are the real edges.
+     */
+    _rightBoundary(i) {
+        const a = this._tabs[i], b = this._tabs[i + 1];
+        return b ? (a.x + a.w / 2 + b.x + b.w / 2) / 2 : a.x + a.w;
+    }
 
-        // Tabs may overlap (Chrome) or have gaps, so split at midpoints
-        // between tab centers rather than testing containment.
-        let index = this._tabs.length - 1;
-        for (let i = 0; i < this._tabs.length - 1; i++) {
-            const a = this._tabs[i], b = this._tabs[i + 1];
-            if (this._cursorX < (a.x + a.w / 2 + b.x + b.w / 2) / 2) {
+    _leftBoundary(i) {
+        return i > 0 ? this._rightBoundary(i - 1) : this._tabs[0].x;
+    }
+
+    _moveCursor(dx) {
+        const last = this._tabs.length - 1;
+        this._cursorX = Math.min(Math.max(this._cursorX + dx * GAIN, this._leftBoundary(0)),
+            this._rightBoundary(last));
+
+        let index = last;
+        for (let i = 0; i < last; i++) {
+            if (this._cursorX < this._rightBoundary(i)) {
                 index = i;
                 break;
             }
@@ -353,9 +376,7 @@ export default class TabSwitchExtension extends Extension {
                 return Clutter.EVENT_PROPAGATE;
             }
             this._state = GestureState.ACTIVE;
-            this._session = new SwitchSession(window);
-            const [dx] = event.get_gesture_motion_delta();
-            this._session.update(dx);
+            this._session = new SwitchSession(window, this._cumX > 0);
             return Clutter.EVENT_STOP;
         }
 

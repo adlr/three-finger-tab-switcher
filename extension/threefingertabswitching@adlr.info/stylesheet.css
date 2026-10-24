@@ -1,7 +1,7 @@
 .tabswitch-highlight {
-  border: 3px solid rgba(53, 132, 228, 0.95);
-  border-radius: 10px;
-  background-color: rgba(53, 132, 228, 0.18);
+  border: 0px solid rgba(255, 255, 255, 0.95);
+  border-radius: 11px;
+  background-color: rgba(154, 206, 254, 0.28);
 }
 
 .tabswitch-label {

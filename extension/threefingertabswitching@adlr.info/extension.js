@@ -252,6 +252,9 @@ class SwitchSession {
 
         this._label.text = t.name || `Tab ${this._index + 1}`;
         const monitor = Main.layoutManager.monitors[this._window.get_monitor()];
+        // Clear the width set for the previous tab, or the preferred width
+        // reported below is that fixed width rather than this title's.
+        this._label.set_width(-1);
         const [, natWidth] = this._label.get_preferred_width(-1);
         const width = Math.min(natWidth, 480);
         this._label.set_width(width);

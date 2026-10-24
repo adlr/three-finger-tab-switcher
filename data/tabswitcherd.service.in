@@ -1,0 +1,11 @@
+[Unit]
+Description=AT-SPI tab helper for Three Finger Tab Switching
+PartOf=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=info.adlr.TabSwitcher
+ExecStart=/usr/bin/gjs -m @DAEMON@
+# Uncomment for verbose matching logs:
+#Environment=TABSWITCHER_DEBUG=1
+Restart=on-failure

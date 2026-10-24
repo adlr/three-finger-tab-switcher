@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=info.adlr.TabSwitcher
+Exec=/usr/bin/gjs -m @DAEMON@
+SystemdService=tabswitcherd.service

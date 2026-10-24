@@ -1,0 +1,13 @@
+.tabswitch-highlight {
+  border: 3px solid rgba(53, 132, 228, 0.95);
+  border-radius: 10px;
+  background-color: rgba(53, 132, 228, 0.18);
+}
+
+.tabswitch-label {
+  background-color: rgba(30, 30, 30, 0.9);
+  color: #ffffff;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 10pt;
+}

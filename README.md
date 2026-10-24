@@ -1,0 +1,90 @@
+# Three Finger Tab Switching
+
+Swipe three fingers left/right on the touchpad to move a highlight across
+the tabs of the focused window; lift your fingers to switch to the
+highlighted tab. Works with Google Chrome today; any app that exposes an
+AT-SPI `page tab list` (Firefox, many GTK apps) should work too.
+Four-finger swipes keep switching workspaces as usual.
+
+## Design
+
+```
+ touchpad ──► gnome-shell extension ──D-Bus (async)──► tabswitcherd ──AT-SPI──► Chrome
+              gestures, overlay,        GetTabs()        window matching,
+              geometry mapping          ActivateTab()    tab discovery, activation
+```
+
+* **extension/** (`threefingertabswitching@adlr.info`): catches three-finger
+  horizontal swipes in the capture phase, before the shell's workspace
+  swipe tracker sees them. It asks the daemon for tabs, draws the highlight
+  and title label, and asks the daemon to activate the tab when the
+  gesture ends.
+* **daemon/tabswitcherd.js**: a gjs process that does all the AT-SPI work.
+  AT-SPI calls are synchronous round trips into the target app. Making them
+  inside gnome-shell would stall the compositor whenever an app is slow, and
+  could deadlock if the query ever reached the shell's own accessibility
+  tree. Keeping per-app logic here also means you can change and restart it
+  without logging out.
+
+The daemon is D-Bus activated (`info.adlr.TabSwitcher`, run as the
+`tabswitcherd.service` systemd user unit), so it starts on the first gesture.
+
+### Finding the right window
+
+AT-SPI's `ACTIVE` state is unreliable: apps don't always update it.
+Chrome, for example, showed no active frame until it was focused again.
+The shell, however, knows exactly which window has focus. So the extension
+sends that window's **pid, title and frame size**, and the daemon scores each
+AT-SPI frame:
+
+* exact title match: +100
+* prefix title match: +50
+* `ACTIVE` state: +20
+* size match: +10
+* frame with no name: −5
+
+If no AT-SPI app has that pid, the daemon searches every app.
+
+### Geometry
+
+On Wayland, AT-SPI only reports positions relative to the app's own window.
+Apps disagree on where that window starts: some measure from the visible
+frame, some from the whole surface including client-side shadows, and some
+(Electron) report physical pixels. The extension tries frame and buffer
+origins, each at scale 1 and at the monitor scale. It uses whichever one
+makes the reported frame size best match Mutter's, and logs the choice.
+
+## Install
+
+```sh
+./install.sh          # symlinks the extension, installs D-Bus + systemd user files
+# Wayland: log out/in so the shell rescans extensions, then
+gnome-extensions enable threefingertabswitching@adlr.info
+```
+
+`install.sh` moves an existing non-symlinked copy of the extension to
+`~/.local/share/gnome-shell/extension-backups/`.
+
+## Debugging
+
+```sh
+# Extension (gesture, window info, geometry choice, highlight moves)
+journalctl --user -f -o cat /usr/bin/gnome-shell | grep tabswitch
+
+# Daemon (window matching, tab lists considered/rejected, activation)
+journalctl --user -f -o cat -u tabswitcherd
+# Verbose candidate scoring: uncomment Environment=TABSWITCHER_DEBUG=1 in
+# ~/.config/systemd/user/tabswitcherd.service, then
+systemctl --user daemon-reload && systemctl --user restart tabswitcherd
+
+# Run the lookup from a terminal, no shell involved
+gjs -m daemon/tabswitcherd.js --list            # all frames, with ACTIVE flag
+gjs -m daemon/tabswitcherd.js --query           # tabs of the ACTIVE frame
+gjs -m daemon/tabswitcherd.js --query "Gmail"   # tabs of frame whose title contains "Gmail"
+```
+
+After editing the daemon, run `systemctl --user restart tabswitcherd`. No
+logout is needed. Editing the extension needs a logout on Wayland.
+
+`dump-tree.js` dumps raw AT-SPI trees. `extension.js` at the top level is the
+older prototype, kept for reference.

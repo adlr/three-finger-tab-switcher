@@ -242,6 +242,23 @@ function findPageTabLists(frame) {
     return out;
 }
 
+/*
+ * Web pages can expose their own role="tablist" widgets (e.g. the Office
+ * Online ribbon), and Collection.GetMatches finds those too. They sit under a
+ * DOCUMENT_WEB node; the browser's own tab strip never does.
+ */
+function isInWebContent(acc, frame) {
+    let node = acc;
+    for (let depth = 0; node && depth < 64; depth++) {
+        if (safe(() => node.get_role()) === Atspi.Role.DOCUMENT_WEB)
+            return true;
+        if (safe(() => node.get_role()) === Atspi.Role.FRAME || node === frame)
+            return false;
+        node = safe(() => node.get_parent());
+    }
+    return false;
+}
+
 function tabsOf(ptl) {
     return children(ptl).filter(c => safe(() => c.get_role()) === Atspi.Role.PAGE_TAB);
 }
@@ -294,18 +311,23 @@ function findTabsForWindow(pid, title, width, height) {
     const usable = [];
     for (const ptl of ptls) {
         const d = describeTabList(ptl);
-        if (d.reject)
+        if (d.reject) {
             debug(`  skipping tab list: ${d.reject}`);
-        else
-            usable.push(d);
+            continue;
+        }
+        d.inWeb = isInWebContent(ptl, match.frame);
+        debug(`  tab list class=${d.cls} tabs=${d.tabs.length}${d.inWeb ? ' (web content)' : ''}`);
+        usable.push(d);
     }
     if (usable.length === 0) {
         log(`"${match.name.slice(0, 60)}": ${ptls.length} tab list(s), none usable (${elapsed()}ms)`);
         return {ok: false, error: 'no usable tab list', app: shortName(match.app)};
     }
 
-    // Prefer the strip with the most tabs; break ties by the top-most one.
-    usable.sort((a, b) => b.tabs.length - a.tabs.length || a.strip.y - b.strip.y);
+    // Prefer the app's own UI over tab lists inside web pages, then the strip
+    // with the most tabs, then the top-most one.
+    usable.sort((a, b) => a.inWeb - b.inWeb || b.tabs.length - a.tabs.length ||
+        a.strip.y - b.strip.y);
     const best = usable[0];
 
     const token = nextToken++;

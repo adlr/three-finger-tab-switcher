@@ -1,0 +1,457 @@
+<title>Tab Highlight Styler</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cantarell:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a mock Chrome window as the stage on top, controls in two columns
+   below it, generated stylesheet.css at the bottom ready to copy. */
+:root {
+  --bg: #f3f4f7;
+  --panel: #ffffff;
+  --fg: #1d2129;
+  --muted: #5f6675;
+  --line: #d9dce4;
+  --accent: #2f6fd6;
+  --focus: #2f6fd6;
+  --code-bg: #f7f8fb;
+
+  /* mock Chrome (light) */
+  --cr-frame: #dfe3eb;
+  --cr-tab-active: #ffffff;
+  --cr-tab-text: #3c4043;
+  --cr-sep: #a9afba;
+  --cr-toolbar: #ffffff;
+  --cr-omni: #eef1f6;
+  --cr-page: #ffffff;
+  --cr-block: #e6e9ef;
+  --cr-shadow: 0 12px 32px rgba(20, 30, 50, 0.18);
+
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-shell: "Adwaita Sans", Cantarell, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171c; --panel: #1d2027; --fg: #e6e8ee; --muted: #9aa1b0;
+    --line: #2f333d; --accent: #78a6f0; --focus: #78a6f0; --code-bg: #171a20;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171c; --panel: #1d2027; --fg: #e6e8ee; --muted: #9aa1b0;
+  --line: #2f333d; --accent: #78a6f0; --focus: #78a6f0; --code-bg: #171a20;
+  color-scheme: dark;
+}
+/* Chrome's own theme is independent of the page theme: toggled in the page. */
+.mock.dark {
+  --cr-frame: #1f2023;
+  --cr-tab-active: #35363a;
+  --cr-tab-text: #e8eaed;
+  --cr-sep: #5f6368;
+  --cr-toolbar: #35363a;
+  --cr-omni: #202124;
+  --cr-page: #202124;
+  --cr-block: #303134;
+  --cr-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 var(--font-ui);
+}
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 20px;
+}
+header { display: grid; gap: 4px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); max-width: 70ch; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+
+/* ---------- stage ---------- */
+.stage-bar {
+  display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  justify-content: space-between;
+}
+.stage-bar .hint { color: var(--muted); font-size: 13px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button {
+  font: inherit; font-size: 13px; padding: 5px 12px; border: 0; cursor: pointer;
+  background: var(--panel); color: var(--fg);
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--panel); }
+
+.stage-scroll {
+  overflow-x: auto;
+  padding: 24px 0 64px;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(120, 140, 200, 0.25), transparent 60%),
+    linear-gradient(135deg, #4a5878, #2c3447);
+}
+.mock {
+  position: relative;
+  width: 1180px;
+  margin: 0 auto;
+  border-radius: 12px;
+  background: var(--cr-frame);
+  box-shadow: var(--cr-shadow);
+  font-family: var(--font-shell);
+  user-select: none;
+}
+.strip {
+  position: relative;
+  height: 51px;
+  outline: none;
+}
+.strip:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); border-radius: 12px 12px 0 0; }
+.tab {
+  position: absolute; top: 10px; height: 41px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 18px 0 22px;
+  color: var(--cr-tab-text); font-size: 12px;
+  white-space: nowrap; overflow: hidden;
+}
+.tab .t { overflow: hidden; text-overflow: ellipsis; }
+.tab .fav { flex: none; width: 16px; height: 16px; border-radius: 4px; }
+.tab::after {
+  content: ""; position: absolute; right: 9px; top: 12px; bottom: 12px;
+  width: 1px; background: var(--cr-sep);
+}
+.tab.active { z-index: 1; }
+.tab.active::before {
+  content: ""; position: absolute; inset: 0 9px; border-radius: 9px 9px 0 0;
+  background: var(--cr-tab-active); z-index: -1;
+}
+.tab.active::after, .tab.before-active::after { display: none; }
+.newtab {
+  position: absolute; top: 16px; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; color: var(--cr-tab-text); font-size: 18px;
+}
+.toolbar {
+  height: 46px; background: var(--cr-toolbar);
+  display: flex; align-items: center; gap: 10px; padding: 0 12px;
+}
+.toolbar .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--cr-block); }
+.omni {
+  flex: 1; height: 32px; border-radius: 16px; background: var(--cr-omni);
+  color: var(--cr-tab-text); font-size: 13px; display: flex; align-items: center; padding: 0 16px;
+  opacity: 0.85;
+}
+.page {
+  height: 230px; background: var(--cr-page); border-radius: 0 0 12px 12px;
+  padding: 28px 40px; display: grid; gap: 14px; align-content: start;
+}
+.page .b { height: 12px; border-radius: 6px; background: var(--cr-block); }
+
+/* The extension's actors, drawn with the CSS being edited. St sizes widgets
+   by their allocation with the border inside, i.e. border-box. */
+.tabswitch-highlight, .tabswitch-label {
+  position: absolute; box-sizing: border-box; pointer-events: none; z-index: 5;
+}
+.tabswitch-label {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--font-shell); line-height: normal;
+}
+
+/* ---------- controls ---------- */
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 16px 18px 18px; display: grid; gap: 12px; min-width: 0;
+}
+.panel h2 {
+  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.panel h2 code { text-transform: none; letter-spacing: 0; color: var(--fg); }
+.row {
+  display: grid; grid-template-columns: 112px 1fr 64px; gap: 10px; align-items: center;
+}
+.row label { font-size: 13px; }
+.row input[type="range"] { width: 100%; accent-color: var(--accent); }
+.row output { font-family: var(--font-mono); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.row .color { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.row input[type="color"] {
+  flex: none; width: 36px; height: 26px; padding: 0; border: 1px solid var(--line);
+  border-radius: 6px; background: none; cursor: pointer;
+}
+.row .color input[type="range"] { min-width: 0; }
+
+.out { display: grid; gap: 10px; }
+.out-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.btn {
+  font: inherit; font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.btn:focus-visible, .seg button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.out-actions { display: flex; gap: 8px; align-items: center; }
+.status { font-size: 12px; color: var(--muted); min-width: 4em; }
+pre {
+  margin: 0; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px 16px; font: 13px/1.55 var(--font-mono);
+}
+.note { color: var(--muted); font-size: 13px; margin: 0; max-width: 80ch; }
+
+@media (max-width: 520px) {
+  .row { grid-template-columns: 92px 1fr 56px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tabswitch-highlight { transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Tab Highlight Styler</h1>
+    <p>Tune <code>stylesheet.css</code> for the three-finger tab switcher against a mock of your Chrome tab strip, using the tab geometry AT-SPI reported. Hover or drag across the tabs, or focus the strip and use ← →, to move the highlight the way a swipe would.</p>
+  </header>
+
+  <div class="stage-bar">
+    <span class="hint" id="hint">Highlighted: tab 7 of 10</span>
+    <div class="seg" role="group" aria-label="Chrome theme">
+      <button type="button" id="cr-light" aria-pressed="true">Chrome light</button>
+      <button type="button" id="cr-dark" aria-pressed="false">Chrome dark</button>
+    </div>
+  </div>
+
+  <div class="stage-scroll">
+    <div class="mock" id="mock">
+      <div class="strip" id="strip" tabindex="0" aria-label="Mock tab strip; use arrow keys to move the highlight"></div>
+      <div class="toolbar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <div class="omni">google.com/search?q=wayland+open+window+at+specific+location</div>
+        <span class="dot"></span>
+      </div>
+      <div class="page">
+        <div class="b" style="width: 38%"></div>
+        <div class="b" style="width: 72%"></div>
+        <div class="b" style="width: 64%"></div>
+        <div class="b" style="width: 69%"></div>
+        <div class="b" style="width: 41%"></div>
+      </div>
+      <div class="tabswitch-highlight" id="hl"></div>
+      <div class="tabswitch-label" id="lbl"></div>
+    </div>
+  </div>
+
+  <div class="panels">
+    <section class="panel" aria-labelledby="h-hl">
+      <h2 id="h-hl">Highlight · <code>.tabswitch-highlight</code></h2>
+      <div class="row"><label for="hl-bw">Bottom border width</label><input type="range" id="hl-bw" min="0" max="8" step="1"><output for="hl-bw"></output></div>
+      <div class="row"><label for="hl-bc">Bottom border color</label><div class="color"><input type="color" id="hl-bc"><input type="range" id="hl-ba" min="0" max="1" step="0.01" aria-label="Border opacity"></div><output for="hl-ba"></output></div>
+      <div class="row"><label for="hl-r">Corner radius</label><input type="range" id="hl-r" min="0" max="24" step="1"><output for="hl-r"></output></div>
+      <div class="row"><label for="hl-fc">Fill color</label><div class="color"><input type="color" id="hl-fc"><input type="range" id="hl-fa" min="0" max="1" step="0.01" aria-label="Fill opacity"></div><output for="hl-fa"></output></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-lbl">
+      <h2 id="h-lbl">Title label · <code>.tabswitch-label</code></h2>
+      <div class="row"><label for="lb-bc">Background</label><div class="color"><input type="color" id="lb-bc"><input type="range" id="lb-ba" min="0" max="1" step="0.01" aria-label="Background opacity"></div><output for="lb-ba"></output></div>
+      <div class="row"><label for="lb-tc">Text color</label><div class="color"><input type="color" id="lb-tc"></div><output for="lb-tc"></output></div>
+      <div class="row"><label for="lb-fs">Font size</label><input type="range" id="lb-fs" min="7" max="16" step="0.5"><output for="lb-fs"></output></div>
+      <div class="row"><label for="lb-pv">Padding (v)</label><input type="range" id="lb-pv" min="0" max="16" step="1"><output for="lb-pv"></output></div>
+      <div class="row"><label for="lb-ph">Padding (h)</label><input type="range" id="lb-ph" min="0" max="24" step="1"><output for="lb-ph"></output></div>
+      <div class="row"><label for="lb-r">Corner radius</label><input type="range" id="lb-r" min="0" max="20" step="1"><output for="lb-r"></output></div>
+    </section>
+  </div>
+
+  <section class="panel out" aria-labelledby="h-out">
+    <div class="out-head">
+      <h2 id="h-out">stylesheet.css</h2>
+      <div class="out-actions">
+        <span class="status" id="status" role="status"></span>
+        <button type="button" class="btn" id="reset">Reset to committed</button>
+        <button type="button" class="btn primary" id="copy">Copy CSS</button>
+      </div>
+    </div>
+    <pre id="css"></pre>
+    <p class="note">Paste over <code>extension/threefingertabswitching@adlr.info/stylesheet.css</code>. The 6&nbsp;px gap under the highlight, the 480&nbsp;px label cap and the 90&nbsp;ms slide are set in <code>extension.js</code>, so they aren't editable here. The label font is your GNOME interface font; this page uses Adwaita Sans if you have it installed, otherwise Cantarell.</p>
+  </section>
+</div>
+
+<script>
+(() => {
+  // Tab rects from tabswitcherd --query on your Chrome (strip-relative x).
+  const TABS = [
+    [44, 123, "Inbox (88) - adlr@gmail.com - Gmail"],
+    [149, 123, "Avoid tearing on tiled displays (!4822) · Merge requests · GNOME / mutter · GitLab"],
+    [254, 122, "2026-10 Bluetooth Audio latency numbers - Google Docs"],
+    [358, 122, "Google Messages for web: Conversations"],
+    [462, 122, "Google Calendar - Week of October 25, 2026"],
+    [566, 122, "Fedora Workstation | The Fedora Project"],
+    [670, 122, "Lenovo X1 Carbon Gen 13 Linux setup - Google Docs"],
+    [774, 122, "Search results - Google Drive"],
+    [878, 122, "tmux 2.1 mouse - Google Search"],
+    [982, 122, "wayland open window at specific location on screen and move it around - Google Search"],
+  ].map(([x, w, name]) => ({ x, y: 10, w, h: 41, name }));
+  const SELECTED = 9;
+  const FAV = ["#d93025", "#e2432a", "#1a73e8", "#1a73e8", "#1a73e8", "#51a2da", "#1a73e8", "#188038", "#4285f4", "#4285f4"];
+  const LABEL_GAP = 6, LABEL_MAX = 480, EDGE = 8, ANIM_MS = 90;
+
+  // Values committed in stylesheet.css.
+  const DEFAULTS = {
+    "hl-bw": 3, "hl-bc": "#3584e4", "hl-ba": 0.95, "hl-r": 11, "hl-fc": "#75ade1", "hl-fa": 0.22,
+    "lb-bc": "#1e1e1e", "lb-ba": 0.9, "lb-tc": "#ffffff", "lb-fs": 10, "lb-pv": 4, "lb-ph": 10, "lb-r": 8,
+  };
+  const KEY = "tabswitch-styler-v1";
+  let vals = { ...DEFAULTS };
+  try { Object.assign(vals, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
+
+  const $ = id => document.getElementById(id);
+  const strip = $("strip"), hl = $("hl"), lbl = $("lbl"), mock = $("mock");
+
+  // ---- tabs ----
+  TABS.forEach((t, i) => {
+    const el = document.createElement("div");
+    el.className = "tab" + (i === SELECTED ? " active" : "") + (i === SELECTED - 1 ? " before-active" : "");
+    el.style.left = t.x + "px";
+    el.style.width = t.w + "px";
+    el.innerHTML = `<span class="fav" style="background:${FAV[i]}"></span><span class="t"></span>`;
+    el.querySelector(".t").textContent = t.name;
+    strip.appendChild(el);
+  });
+  const nt = document.createElement("div");
+  nt.className = "newtab"; nt.textContent = "+";
+  const lastTab = TABS[TABS.length - 1];
+  nt.style.left = (lastTab.x + lastTab.w + 2) + "px";
+  strip.appendChild(nt);
+
+  // Same hit regions as extension.js: split at midpoints between tab centers.
+  const rightBoundary = i => {
+    const a = TABS[i], b = TABS[i + 1];
+    return b ? (a.x + a.w / 2 + b.x + b.w / 2) / 2 : a.x + a.w;
+  };
+  const indexAt = x => {
+    for (let i = 0; i < TABS.length - 1; i++) if (x < rightBoundary(i)) return i;
+    return TABS.length - 1;
+  };
+
+  let index = 6;
+  function place(animate) {
+    const t = TABS[index];
+    hl.style.transition = animate
+      ? `left ${ANIM_MS}ms cubic-bezier(.25,.46,.45,.94), width ${ANIM_MS}ms cubic-bezier(.25,.46,.45,.94)`
+      : "none";
+    Object.assign(hl.style, { left: t.x + "px", top: t.y + "px", width: t.w + "px", height: t.h + "px" });
+
+    lbl.textContent = t.name;
+    // Measure unconstrained: an absolutely positioned box near the right
+    // edge would otherwise shrink to fit and report a narrower width.
+    lbl.style.width = "max-content";
+    lbl.style.left = "0px";
+    const nat = Math.ceil(lbl.scrollWidth + parseFloat(getComputedStyle(lbl).borderLeftWidth || 0) * 2);
+    const width = Math.min(nat, LABEL_MAX);
+    lbl.style.width = width + "px";
+    const x = Math.min(Math.max(t.x + t.w / 2 - width / 2, EDGE), mock.clientWidth - width - EDGE);
+    lbl.style.left = Math.round(x) + "px";
+    lbl.style.top = (t.y + t.h + LABEL_GAP) + "px";
+    $("hint").textContent = `Highlighted: tab ${index + 1} of ${TABS.length}` + (index === SELECTED ? " (current tab)" : "");
+  }
+  function setIndex(i) {
+    i = Math.max(0, Math.min(TABS.length - 1, i));
+    if (i === index) return;
+    index = i;
+    place(true);
+  }
+  const stripX = e => e.clientX - strip.getBoundingClientRect().left;
+  strip.addEventListener("pointermove", e => setIndex(indexAt(stripX(e))));
+  strip.addEventListener("pointerdown", e => setIndex(indexAt(stripX(e))));
+  strip.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight") { setIndex(index + 1); e.preventDefault(); }
+    if (e.key === "ArrowLeft") { setIndex(index - 1); e.preventDefault(); }
+  });
+
+  // ---- Chrome theme toggle ----
+  function setChromeDark(dark) {
+    mock.classList.toggle("dark", dark);
+    $("cr-dark").setAttribute("aria-pressed", String(dark));
+    $("cr-light").setAttribute("aria-pressed", String(!dark));
+  }
+  $("cr-dark").onclick = () => setChromeDark(true);
+  $("cr-light").onclick = () => setChromeDark(false);
+  setChromeDark(window.matchMedia("(prefers-color-scheme: dark)").matches);
+
+  // ---- styling ----
+  const rgba = (hex, a) => {
+    const n = parseInt(hex.slice(1), 16);
+    const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    return +a >= 1 ? hex : `rgba(${r}, ${g}, ${b}, ${(+a).toFixed(2).replace(/0$/, "")})`;
+  };
+  const fmt = {
+    "hl-bw": v => v + "px", "hl-ba": v => (+v).toFixed(2), "hl-r": v => v + "px", "hl-fa": v => (+v).toFixed(2),
+    "lb-ba": v => (+v).toFixed(2), "lb-tc": v => v, "lb-fs": v => v + "pt",
+    "lb-pv": v => v + "px", "lb-ph": v => v + "px", "lb-r": v => v + "px",
+  };
+
+  function buildCss(v) {
+    return `.tabswitch-highlight {
+  border-bottom: ${v["hl-bw"]}px solid ${rgba(v["hl-bc"], v["hl-ba"])};
+  border-radius: ${v["hl-r"]}px;
+  background-color: ${rgba(v["hl-fc"], v["hl-fa"])};
+}
+
+.tabswitch-label {
+  background-color: ${rgba(v["lb-bc"], v["lb-ba"])};
+  color: ${v["lb-tc"]};
+  padding: ${v["lb-pv"]}px ${v["lb-ph"]}px;
+  border-radius: ${v["lb-r"]}px;
+  font-size: ${v["lb-fs"]}pt;
+}
+`;
+  }
+
+  const live = document.createElement("style");
+  document.head.appendChild(live);
+
+  function render() {
+    for (const id of Object.keys(DEFAULTS)) {
+      const input = $(id);
+      if (input.value !== String(vals[id])) input.value = vals[id];
+      const out = document.querySelector(`output[for="${id}"]`);
+      if (out) out.textContent = fmt[id] ? fmt[id](vals[id]) : "";
+    }
+    const css = buildCss(vals);
+    live.textContent = css.replace(/\.tabswitch-/g, ".mock .tabswitch-");
+    $("css").textContent = css;
+    place(false);
+    try { localStorage.setItem(KEY, JSON.stringify(vals)); } catch (e) {}
+  }
+
+  for (const id of Object.keys(DEFAULTS)) {
+    $(id).addEventListener("input", e => {
+      vals[id] = e.target.type === "color" ? e.target.value : +e.target.value;
+      render();
+    });
+  }
+
+  $("reset").onclick = () => {
+    vals = { ...DEFAULTS };
+    render();
+    $("status").textContent = "Reset";
+  };
+  $("copy").onclick = () => {
+    const text = $("css").textContent;
+    const select = () => {
+      const r = document.createRange();
+      r.selectNodeContents($("css"));
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      $("status").textContent = "Selected — press Ctrl+C";
+    };
+    try {
+      navigator.clipboard.writeText(text).then(() => { $("status").textContent = "Copied"; }, select);
+    } catch (e) { select(); }
+  };
+
+  render();
+  if (document.fonts) document.fonts.ready.then(() => place(false));
+})();
+</script>

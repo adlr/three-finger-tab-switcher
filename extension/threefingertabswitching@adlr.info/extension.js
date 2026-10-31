@@ -263,15 +263,11 @@ class SwitchSession {
         this._label.set_position(Math.round(x), geom.y + geom.height + 6);
     }
 
-    /* Fingers lifted (or the gesture was cancelled). */
-    finish(cancelled) {
+    /* Fingers lifted (or the gesture was cancelled, e.g. by sliding off the
+     * touchpad edge, which we treat the same way). */
+    finish() {
         this._finished = true;
         this._destroyUi();
-        if (cancelled) {
-            log('gesture cancelled');
-            this._destroyed = true;
-            return;
-        }
         if (this._noTabs) {
             this._destroyed = true;
             return;
@@ -385,7 +381,9 @@ export default class TabSwitchExtension extends Extension {
 
         case GestureState.ACTIVE:
             if (ending) {
-                this._session?.finish(phase === Clutter.TouchpadGesturePhase.CANCEL);
+                if (phase === Clutter.TouchpadGesturePhase.CANCEL)
+                    log('gesture cancelled; activating the highlighted tab anyway');
+                this._session?.finish();
                 this._session = null;
                 this._state = GestureState.NONE;
             } else {

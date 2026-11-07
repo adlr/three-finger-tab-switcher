@@ -127,13 +127,15 @@ class SwitchSession {
         }, this);
 
         const frame = window.get_frame_rect();
+        const buffer = window.get_buffer_rect();
         const pid = window.get_pid();
         const title = window.get_title() ?? '';
         log(`begin: wm_class=${window.get_wm_class()} pid=${pid} ` +
             `client=${window.get_client_type() === Meta.WindowClientType.WAYLAND ? 'wayland' : 'x11'} title="${title}" frame ${rectStr(frame)}`);
 
-        Gio.DBus.session.call(BUS_NAME, OBJECT_PATH, IFACE, 'GetTabs',
-            new GLib.Variant('(usii)', [pid, title, frame.width, frame.height]),
+        Gio.DBus.session.call(BUS_NAME, OBJECT_PATH, IFACE, 'GetTabsForWindow',
+            new GLib.Variant('(tusiiii)', [window.get_id(), pid, title,
+                frame.width, frame.height, buffer.width, buffer.height]),
             new GLib.VariantType('(s)'), Gio.DBusCallFlags.NONE,
             GET_TABS_TIMEOUT_MS, null, (conn, res) => {
                 let reply;

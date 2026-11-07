@@ -34,14 +34,25 @@ The daemon is D-Bus activated (`info.adlr.TabSwitcher`, run as the
 AT-SPI's `ACTIVE` state is unreliable: apps don't always update it.
 Chrome, for example, showed no active frame until it was focused again.
 The shell, however, knows exactly which window has focus. So the extension
-sends that window's **pid, title and frame size**, and the daemon scores each
-AT-SPI frame:
+sends that window's **id, pid, title, and frame and buffer sizes**, and the
+daemon scores each AT-SPI frame:
 
 * exact title match: +100
-* prefix title match: +50
+* prefix title match, or the title minus its last " - App" part starts the
+  frame name: +50
+* size within 2px of the frame or buffer size (at some scale): +30;
+  within 64px: +10
+* the frame this window last matched by title: +25
 * `ACTIVE` state: +20
-* size match: +10
 * frame with no name: −5
+
+Titles alone aren't enough. Chrome's frame names add text such as
+"High memory usage - 1.2 GB" and the profile name, and Gmail flashes
+notifications into the title, so the title can differ from the frame name a
+moment later. Sizes alone aren't enough either, because several windows of an
+app are often the same size. Remembering the last title match keeps a window
+attached to its frame while its title is flashing. A tie is logged as
+"ambiguous match".
 
 If no AT-SPI app has that pid, the daemon searches every app.
 

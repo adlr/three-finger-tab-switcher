@@ -29,7 +29,21 @@ const OBJECT_PATH = '/info/adlr/TabSwitcher';
 const IFACE_XML = `
 <node>
   <interface name="info.adlr.TabSwitcher1">
-    <!-- Returns a JSON object; see findTabsForWindow() -->
+    <!-- Returns a JSON object; see findTabsForWindow(). window is the shell's
+         Meta.Window id, and the sizes are its frame and buffer (frame plus
+         client-side shadows) rects. -->
+    <method name="GetTabsForWindow">
+      <arg type="t" name="window" direction="in"/>
+      <arg type="u" name="pid" direction="in"/>
+      <arg type="s" name="title" direction="in"/>
+      <arg type="i" name="frame_width" direction="in"/>
+      <arg type="i" name="frame_height" direction="in"/>
+      <arg type="i" name="buffer_width" direction="in"/>
+      <arg type="i" name="buffer_height" direction="in"/>
+      <arg type="s" name="result" direction="out"/>
+    </method>
+    <!-- Older form of GetTabsForWindow, kept so that a shell still running
+         the previous extension keeps working after the daemon is upgraded. -->
     <method name="GetTabs">
       <arg type="u" name="pid" direction="in"/>
       <arg type="s" name="title" direction="in"/>
@@ -50,6 +64,7 @@ const ATSPI_TIMEOUT_MS = 800;
 const DFS_NODE_LIMIT = 4000;
 const DFS_DEPTH_LIMIT = 25;
 const MAX_REMEMBERED_RESULTS = 8;
+const MAX_REMEMBERED_WINDOWS = 64;
 
 function log(msg) {
     print(`tabswitcherd: ${msg}`);
@@ -135,70 +150,131 @@ function shortName(acc) {
  * Window matching. The shell knows exactly which Meta.Window is focused, so we
  * match on (pid, title, size) rather than trusting the AT-SPI ACTIVE state,
  * which apps don't always keep up to date. ACTIVE is only a tie-breaker.
+ *
+ * Neither title nor size is reliable alone. Chrome's AT-SPI frame names add
+ * text the window title lacks ("... - High memory usage - 1.2 GB - Google
+ * Chrome - <profile>"), and pages like Gmail flash notifications into the
+ * title, so it can differ from the frame name moments later. Several windows
+ * of one app often have similar sizes. So we also remember which frame each
+ * window matched by title and prefer it when nothing else decides.
  */
-function scoreFrame(frame, title, width, height) {
+
+// Meta.Window id -> AT-SPI path of the frame it last matched by title.
+const windowFrames = new Map();
+
+function titleScore(name, title) {
+    if (!title || !name)
+        return [0, ''];
+    if (name === title)
+        return [100, 'title='];
+    if (name.startsWith(title) || title.startsWith(name))
+        return [50, 'title~'];
+    // "Page - App" against "Page - <extra> - App ...": compare the page part.
+    const cut = title.lastIndexOf(' - ');
+    const page = cut > 0 ? title.slice(0, cut) : '';
+    if (page && (name === page || name.startsWith(`${page} - `)))
+        return [50, 'page~'];
+    return [0, ''];
+}
+
+function sizeScore(r, sizes) {
+    if (r.w <= 0)
+        return [0, ''];
+    // Apps report logical or physical pixels and may include client-side
+    // shadows, so try each scale against both the frame and buffer sizes.
+    let best = [0, ''];
+    for (const [i, [w, h]] of sizes.entries()) {
+        if (w <= 0 || h <= 0)
+            continue;
+        for (const s of [1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
+            const err = Math.max(Math.abs(r.w / s - w), Math.abs(r.h / s - h));
+            const which = i === 0 ? 'frame' : 'buffer';
+            if (err <= 2 && best[0] < 30)
+                best = [30, `size=${which}@${s}`];
+            else if (err <= 64 && best[0] < 10)
+                best = [10, `size~${which}@${s}`];
+        }
+    }
+    return best;
+}
+
+function scoreFrame(frame, win) {
     const name = safe(() => frame.get_name(), '') ?? '';
+    const path = safe(() => frame.path, '');
     const r = rect(frame);
     let score = 0;
     const why = [];
-    if (title && name === title) {
-        score += 100;
-        why.push('title=');
-    } else if (title && name && (name.startsWith(title) || title.startsWith(name))) {
-        score += 50;
-        why.push('title~');
-    }
-    if (hasState(frame, Atspi.StateType.ACTIVE)) {
-        score += 20;
-        why.push('active');
-    }
-    if (width > 0 && height > 0 && r.w > 0) {
-        // Apps report logical or physical pixels and may include client-side
-        // shadows, so accept anything within a scale factor of 1..3.
-        for (const s of [1, 1.25, 1.5, 1.75, 2, 2.5, 3]) {
-            if (Math.abs(r.w / s - width) <= 64 && Math.abs(r.h / s - height) <= 64) {
-                score += 10;
-                why.push(`size@${s}`);
-                break;
-            }
-        }
-    }
-    if (!name) {
-        score -= 5;
-        why.push('noname');
-    }
-    return {score, why: why.join(','), name, rect: r};
+    const add = ([n, label]) => {
+        score += n;
+        if (label)
+            why.push(label);
+    };
+    add(titleScore(name, win.title));
+    add(sizeScore(r, win.sizes));
+    if (win.id && path && windowFrames.get(win.id) === path)
+        add([25, 'seen']);
+    if (hasState(frame, Atspi.StateType.ACTIVE))
+        add([20, 'active']);
+    if (!name)
+        add([-5, 'noname']);
+    return {score, why: why.join(','), name, path, rect: r};
 }
 
-function findFrame(pid, title, width, height) {
+function rememberWindowFrame(win, match) {
+    if (!win.id || !match.path || !/title|page/.test(match.why))
+        return;
+    windowFrames.delete(win.id);
+    windowFrames.set(win.id, match.path);
+    for (const k of windowFrames.keys()) {
+        if (windowFrames.size <= MAX_REMEMBERED_WINDOWS)
+            break;
+        windowFrames.delete(k);
+    }
+}
+
+function findFrame(win) {
     const desktop = Atspi.get_desktop(0);
     const apps = children(desktop);
-    let candidates = apps.filter(a => safe(() => a.get_process_id(), -1) === pid);
+    let candidates = apps.filter(a => safe(() => a.get_process_id(), -1) === win.pid);
     if (candidates.length === 0) {
-        log(`no AT-SPI app with pid ${pid} (apps: ${apps.map(a =>
+        log(`no AT-SPI app with pid ${win.pid} (apps: ${apps.map(a =>
             `${shortName(a)}/${safe(() => a.get_process_id(), '?')}`).join(', ')}); ` +
             'searching all apps by title');
         candidates = apps;
     }
 
     let best = null;
+    let tied = false;
     for (const app of candidates) {
         // libatspi caches each app's tree and only refreshes it on change
         // events. Chromium builds its tree lazily without telling us, so a
         // long-running daemon would keep seeing an empty frame forever.
         safe(() => app.clear_cache());
         for (const frame of children(app)) {
-            const s = scoreFrame(frame, title, width, height);
+            const s = scoreFrame(frame, win);
             debug(`  candidate ${shortName(app)}: "${s.name.slice(0, 60)}" ` +
                 `${s.rect.w}x${s.rect.h} score=${s.score} (${s.why})`);
-            if (s.score > 0 && (!best || s.score > best.score))
+            if (s.score <= 0)
+                continue;
+            if (best && s.score === best.score)
+                tied = true;
+            if (!best || s.score > best.score) {
                 best = {...s, frame, app};
+                tied = false;
+            }
         }
     }
-    if (!best)
-        log(`no frame matched pid=${pid} title="${title}" size=${width}x${height}`);
+    const sizes = win.sizes.map(([w, h]) => `${w}x${h}`).join('/');
+    if (!best) {
+        log(`no frame matched pid=${win.pid} title="${win.title}" size=${sizes}`);
+        return null;
+    }
+    if (tied)
+        log(`ambiguous match for title="${win.title}" size=${sizes}: several frames scored ` +
+            `${best.score} (${best.why}); picked "${best.name.slice(0, 60)}"`);
     else
         debug(`picked frame "${best.name.slice(0, 60)}" score=${best.score} (${best.why})`);
+    rememberWindowFrame(win, best);
     return best;
 }
 
@@ -299,11 +375,16 @@ function describeTabList(ptl) {
 let nextToken = 1;
 const remembered = new Map();  // token -> {ptl, tabObjs}
 
-function findTabsForWindow(pid, title, width, height) {
+/*
+ * win: {id, pid, title, sizes}, where id is the shell's window id (0 if
+ * unknown) and sizes is [[frameW, frameH], [bufferW, bufferH]] (the buffer
+ * entry may be missing).
+ */
+function findTabsForWindow(win) {
     const t0 = GLib.get_monotonic_time();
     const elapsed = () => ((GLib.get_monotonic_time() - t0) / 1000).toFixed(1);
 
-    const match = findFrame(pid, title, width, height);
+    const match = findFrame(win);
     if (!match)
         return {ok: false, error: 'no matching AT-SPI frame'};
 
@@ -393,11 +474,20 @@ function activateTab(token, index) {
 }
 
 class Service {
+    GetTabsForWindow(id, pid, title, frameW, frameH, bufferW, bufferH) {
+        return this._getTabs({id, pid, title, sizes: [[frameW, frameH], [bufferW, bufferH]]});
+    }
+
     GetTabs(pid, title, width, height) {
-        debug(`GetTabs pid=${pid} title="${title}" size=${width}x${height}`);
+        return this._getTabs({id: 0, pid, title, sizes: [[width, height]]});
+    }
+
+    _getTabs(win) {
+        debug(`GetTabs window=${win.id} pid=${win.pid} title="${win.title}" ` +
+            `size=${win.sizes.map(([w, h]) => `${w}x${h}`).join('/')}`);
         let result;
         try {
-            result = findTabsForWindow(pid, title, width, height);
+            result = findTabsForWindow(win);
         } catch (e) {
             log(`GetTabs failed: ${e.message}\n${e.stack}`);
             result = {ok: false, error: e.message};
@@ -436,7 +526,8 @@ function cliQuery(needle) {
             if (!hit)
                 continue;
             const r = rect(f);
-            const res = findTabsForWindow(app.get_process_id(), name, r.w, r.h);
+            const res = findTabsForWindow({id: 0, pid: app.get_process_id(), title: name,
+                sizes: [[r.w, r.h]]});
             print(JSON.stringify(res, null, 2));
             return;
         }

@@ -4,8 +4,8 @@
  * in the focused window's tab strip; lifting the fingers activates the
  * highlighted tab.
  *
- * All AT-SPI work happens in a separate process (daemon/tabswitcherd.js) that
- * we call over D-Bus asynchronously, so a slow or hung app can never stall
+ * All AT-SPI work happens in a separate process (tabswitcherd.js, installed
+ * from the extension's settings) that we call over D-Bus asynchronously, so a slow or hung app can never stall
  * the compositor. This file only handles gestures, geometry and drawing.
  *
  * Logs: journalctl --user -f -o cat /usr/bin/gnome-shell | grep tabswitch
@@ -21,6 +21,7 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const DEBUG = true;
@@ -105,7 +106,8 @@ function computeMapping(window, atspiFrame) {
 
 /* One gesture, from the moment we claim it until the fingers lift. */
 class SwitchSession {
-    constructor(window, movingRight) {
+    constructor(extension, window, movingRight) {
+        this._extension = extension;
         this._window = window;
         this._movingRight = movingRight;
         this._pendingDx = 0;
@@ -143,6 +145,8 @@ class SwitchSession {
                     [reply] = conn.call_finish(res).deepUnpack();
                 } catch (e) {
                     log(`GetTabs D-Bus call failed (is tabswitcherd installed?): ${e.message}`);
+                    if (e.matches(Gio.DBusError, Gio.DBusError.SERVICE_UNKNOWN))
+                        this._extension.notifyDaemonMissing();
                     return;
                 }
                 this._onTabs(JSON.parse(reply));
@@ -323,6 +327,7 @@ export default class TabSwitchExtension extends Extension {
         this._session = null;
         this._cumX = 0;
         this._cumY = 0;
+        this._notifiedDaemonMissing = false;
         this._capturedId = global.stage.connect('captured-event::touchpad',
             this._onTouchpadEvent.bind(this));
         log('enabled');
@@ -333,6 +338,23 @@ export default class TabSwitchExtension extends Extension {
         this._session?.destroy();
         this._session = null;
         log('disabled');
+    }
+
+    /* Once per session, point the user at the settings page that installs
+     * the daemon. */
+    notifyDaemonMissing() {
+        if (this._notifiedDaemonMissing)
+            return;
+        this._notifiedDaemonMissing = true;
+        const source = MessageTray.getSystemSource();
+        const notification = new MessageTray.Notification({
+            source,
+            title: 'Three Finger Tab Switching',
+            body: 'The tabswitcherd helper is not installed. Install it from the extension\u2019s settings.',
+        });
+        notification.addAction('Open Settings', () => this.openPreferences());
+        notification.connect('activated', () => this.openPreferences());
+        source.addNotification(notification);
     }
 
     _onTouchpadEvent(actor, event) {
@@ -377,7 +399,7 @@ export default class TabSwitchExtension extends Extension {
                 return Clutter.EVENT_PROPAGATE;
             }
             this._state = GestureState.ACTIVE;
-            this._session = new SwitchSession(window, this._cumX > 0);
+            this._session = new SwitchSession(this, window, this._cumX > 0);
             return Clutter.EVENT_STOP;
         }
 

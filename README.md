@@ -19,15 +19,20 @@ Four-finger swipes keep switching workspaces as usual.
   swipe tracker sees them. It asks the daemon for tabs, draws the highlight
   and title label, and asks the daemon to activate the tab when the
   gesture ends.
-* **daemon/tabswitcherd.js**: a gjs process that does all the AT-SPI work.
-  AT-SPI calls are synchronous round trips into the target app. Making them
-  inside gnome-shell would stall the compositor whenever an app is slow, and
-  could deadlock if the query ever reached the shell's own accessibility
-  tree. Keeping per-app logic here also means you can change and restart it
-  without logging out.
+* **tabswitcherd.js** (shipped inside the extension): a gjs process that
+  does all the AT-SPI work. AT-SPI calls are synchronous round trips into
+  the target app. Making them inside gnome-shell would stall the compositor
+  whenever an app is slow, and could deadlock if the query ever reached the
+  shell's own accessibility tree. Keeping per-app logic here also means you
+  can change and restart it without logging out.
 
 The daemon is D-Bus activated (`info.adlr.TabSwitcher`, run as the
 `tabswitcherd.service` systemd user unit), so it starts on the first gesture.
+The extension's settings page installs and uninstalls the D-Bus and systemd
+files (`daemonInstall.js`). They point at `tabswitcherd.js` in the extension's
+own directory, so updating the extension updates the daemon. If the daemon
+isn't installed, the first swipe shows a notification that opens the
+settings.
 
 ### Finding the right window
 
@@ -65,16 +70,20 @@ frame, some from the whole surface including client-side shadows, and some
 origins, each at scale 1 and at the monitor scale. It uses whichever one
 makes the reported frame size best match Mutter's, and logs the choice.
 
-## Install
+## Build and install
 
 ```sh
-./install.sh          # symlinks the extension, installs D-Bus + systemd user files
+./build.sh    # -> dist/threefingertabswitching@adlr.info.shell-extension.zip
+gnome-extensions install --force dist/threefingertabswitching@adlr.info.shell-extension.zip
 # Wayland: log out/in so the shell rescans extensions, then
 gnome-extensions enable threefingertabswitching@adlr.info
+gnome-extensions prefs threefingertabswitching@adlr.info   # click Install
 ```
 
-`install.sh` moves an existing non-symlinked copy of the extension to
-`~/.local/share/gnome-shell/extension-backups/`.
+Removing the extension leaves the daemon's service files in place, so
+uninstall the daemon from the settings first. To remove them by hand, delete
+`~/.local/share/dbus-1/services/info.adlr.TabSwitcher.service` and
+`~/.config/systemd/user/tabswitcherd.service`.
 
 ## Debugging
 
@@ -89,9 +98,9 @@ journalctl --user -f -o cat -u tabswitcherd
 systemctl --user daemon-reload && systemctl --user restart tabswitcherd
 
 # Run the lookup from a terminal, no shell involved
-gjs -m daemon/tabswitcherd.js --list            # all frames, with ACTIVE flag
-gjs -m daemon/tabswitcherd.js --query           # tabs of the ACTIVE frame
-gjs -m daemon/tabswitcherd.js --query "Gmail"   # tabs of frame whose title contains "Gmail"
+gjs -m extension/threefingertabswitching@adlr.info/tabswitcherd.js --list            # all frames, with ACTIVE flag
+gjs -m extension/threefingertabswitching@adlr.info/tabswitcherd.js --query           # tabs of the ACTIVE frame
+gjs -m extension/threefingertabswitching@adlr.info/tabswitcherd.js --query "Gmail"   # tabs of frame whose title contains "Gmail"
 ```
 
 After editing the daemon, run `systemctl --user restart tabswitcherd`. No

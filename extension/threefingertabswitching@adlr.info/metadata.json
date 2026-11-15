@@ -3,6 +3,6 @@
   "description": "Swipe three fingers left/right to move between tabs of the focused window (Chrome, Firefox, ...). Needs the tabswitcherd helper.",
   "uuid": "threefingertabswitching@adlr.info",
   "url": "https://github.com/adlr/windowgestures",
-  "shell-version": ["50"],
+  "shell-version": ["50", "51"],
   "version": 7
 }
